@@ -9,9 +9,15 @@ import tkinter.font as tkFont
 
 # === CONFIG ===
 BULK_FILE = "cards_with_tags_20250622170831_withuri.json"
-SYNERGY_FILE = "generated_synergies20250623203218.json"
-SYNERGY_FILE_TMP = "synergies_tmp.json"
+
+SYNERGY_FILE_TMP_NAME = "synergies_tmp"
 IMAGE_CACHE_DIR = "image-dataset/"
+
+# IGNORE_EDHREC = True
+# SYNERGY_FILE = "generated_synergies20250623203218.json" # Generated from my Model
+
+IGNORE_EDHREC = False
+SYNERGY_FILE = "random_real_synergies.json"  # Synergies from EDHREC
 
 UI_SCALE = 1.0
 IMAGE_SCALE = 2
@@ -74,6 +80,11 @@ def resize_image(img, height=400):
 
 class SynergyApp:
     def __init__(self, root):
+        if IGNORE_EDHREC:
+            self.synergy_file_tmp = SYNERGY_FILE_TMP_NAME + ".json"
+        else:
+            self.synergy_file_tmp = SYNERGY_FILE_TMP_NAME + "_edhrec.json"
+
         self.merge_synergies_files()
         self.root = root
         self.root.title("MTG Synergy Labeler")
@@ -83,10 +94,19 @@ class SynergyApp:
         self.card_lookup = {card["name"]: card for card in self.cards}
 
         self.synergy_entries = load_json(SYNERGY_FILE)
+        if not IGNORE_EDHREC:
+            # dont count the labels that are fake edhrec None synergy = 0/1
+            self.synergy_entries = [
+                entry
+                for entry in self.synergy_entries
+                if entry.get("synergy_edhrec", None) is not None
+            ]
+        print("synergy entries length:", len(self.synergy_entries))
+
         self.synergies_without_manual = [
             entry
             for entry in self.synergy_entries
-            if entry.get("synergy_manual") is None
+            if (entry.get("synergy_manual") is None)
         ]
         self.synergies_labeled_this_session = []
 
@@ -105,10 +125,10 @@ class SynergyApp:
         Merges the synergies.json file with the synergies_tmp.json file.
         This is useful for saving progress without losing existing entries.
         """
-        if not os.path.exists(SYNERGY_FILE_TMP):
+        if not os.path.exists(self.synergy_file_tmp):
             print("No TMP FILE")
             return
-        synergies_tmp = load_json(SYNERGY_FILE_TMP)
+        synergies_tmp = load_json(self.synergy_file_tmp)
         synergies = load_json(SYNERGY_FILE)
 
         # Merge synergies, avoiding duplicates
@@ -122,7 +142,7 @@ class SynergyApp:
         merged_synergies = list(existing_synergies.values())
         save_json(merged_synergies, SYNERGY_FILE)
 
-        open(SYNERGY_FILE_TMP, "w").close()
+        open(self.synergy_file_tmp, "w").close()
 
     def get_current_entry(self):
         entry = self.synergies_without_manual[self.current_ptr]
@@ -188,13 +208,33 @@ class SynergyApp:
             self.text_boxes[i].config(state="disabled")
             self.text_vars[i].set(card["name"])
 
-        pred = entry.get("synergy_predicted", "N/A")
+        pred = entry.get("synergy_predicted", None)
         manual = entry.get("synergy_manual", None)
         synergy_edhrec = entry.get("synergy_edhrec", None)
+        synergy = entry.get("synergy", None)
 
-        manual_str = manual
+        if synergy is None:
+            synergy = "N/A"
+        else:
+            synergy = f"{synergy:.2f}"
 
-        self.info_label.config(text=f"Predicted synergy: {pred:.2f} / ")
+        if synergy_edhrec is None or IGNORE_EDHREC:
+            synergy_edhrec = "N/A"
+        else:
+            synergy_edhrec = f"{synergy_edhrec:.2f}"
+
+        if pred is None:
+            pred = "N/A"
+        else:
+            pred = f"{pred:.2f}"
+        if manual is None:
+            manual_str = "N/A"
+        else:
+            manual_str = f"{manual:.2f}"
+
+        self.info_label.config(
+            text=f"Predicted synergy: {pred} / EDHREC: {synergy_edhrec} / Synergy: {synergy}"
+        )
         self.manual_label.config(text=f"Manual synergy: {manual_str}")
 
         self.manual_label.config(fg=self.synergy_color(manual))
@@ -256,7 +296,7 @@ class SynergyApp:
                         self.synergies_without_manual[self.current_ptr]
                     )
 
-        save_json(self.synergies_labeled_this_session, SYNERGY_FILE_TMP)
+        save_json(self.synergies_labeled_this_session, self.synergy_file_tmp)
         self.display_current_pair()  # refresh UI buttons etc.
 
     def jump_to_synergy(self):
