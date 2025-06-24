@@ -533,8 +533,9 @@ SYNERGY_FILE = "random_real_synergies.json"
 IMAGE_CACHE_DIR = "image-dataset/"
 
 # === CONFIG ===
-UI_SCALE = 0.75  # <--- You can change this to scale up or down
+UI_SCALE = 1.0  # <--- You can change this to scale up or down
 IMAGE_SCALE = 2
+FONT_SIZE = 12
 
 
 def s(value):
@@ -581,7 +582,7 @@ def load_or_download_image(card):
 
 
 def resize_image(img, height=400):
-    height = height * IMAGE_SCALE
+    height = int(height * IMAGE_SCALE)
     w, h = img.size
     new_w = int((height / h) * w)
     return img.resize((new_w, height), Image.LANCZOS)
@@ -633,12 +634,12 @@ class SynergyApp:
             text = tk.Text(
                 frame,
                 height=s(10),
-                width=s(100),
+                width=s(60),
                 wrap="word",
                 font=sf(
                     (
                         "Noto Sans Inscriptional Pahlavi",
-                        20,
+                        FONT_SIZE,
                     )
                 ),
                 state="disabled",
@@ -649,7 +650,7 @@ class SynergyApp:
             search = ttk.Combobox(
                 frame,
                 textvariable=var,
-                font=sf(("Noto Sans Inscriptional Pahlavi", 20)),
+                font=sf(("Noto Sans Inscriptional Pahlavi", FONT_SIZE)),
             )
             search.pack(pady=s(5), fill="x")
             search.bind("<KeyRelease>", lambda e, s=side: self.update_suggestions(e, s))
@@ -667,7 +668,7 @@ class SynergyApp:
             self.root,
             text="",
             fg="blue",
-            font=sf(("Noto Sans Inscriptional Pahlavi", 20)),
+            font=sf(("Noto Sans Inscriptional Pahlavi", FONT_SIZE * 0.75, "bold")),
             bg="#f0f0f0",
         )
         self.info_label.pack(pady=s(5))
@@ -681,7 +682,7 @@ class SynergyApp:
             command=self.go_back,
             width=s(40),
             height=s(4),
-            font=sf(("Noto Sans Inscriptional Pahlavi", 20)),
+            font=sf(("Noto Sans Inscriptional Pahlavi", FONT_SIZE)),
         )
         self.back_btn.pack(side="left", padx=s(5))
 
@@ -691,7 +692,7 @@ class SynergyApp:
             command=lambda: self.label_synergy(1),
             width=s(40),
             height=s(4),
-            font=sf(("Noto Sans Inscriptional Pahlavi", 20)),
+            font=sf(("Noto Sans Inscriptional Pahlavi", FONT_SIZE)),
             bg="#d1ffd1",
         )
         self.yes_btn.pack(side="left", padx=s(5))
@@ -702,7 +703,7 @@ class SynergyApp:
             command=lambda: self.label_synergy(0),
             width=s(40),
             height=s(4),
-            font=sf(("Noto Sans Inscriptional Pahlavi", 20)),
+            font=sf(("Noto Sans Inscriptional Pahlavi", FONT_SIZE)),
             bg="#ffd1d1",
         )
         self.no_btn.pack(side="left", padx=s(5))
@@ -714,14 +715,14 @@ class SynergyApp:
             state="disabled",
             width=s(40),
             height=s(4),
-            font=sf(("Noto Sans Inscriptional Pahlavi", 20)),
+            font=sf(("Noto Sans Inscriptional Pahlavi", FONT_SIZE)),
         )
         self.next_btn.pack(side="left", padx=s(5))
 
         self.status_label = tk.Label(
             self.root,
             text="",
-            font=sf(("Noto Sans Inscriptional Pahlavi", 25, "bold")),
+            font=sf(("Noto Sans Inscriptional Pahlavi", FONT_SIZE * 1.5, "bold")),
             fg="red",
             bg="#f0f0f0",
         )
@@ -826,6 +827,16 @@ class SynergyApp:
 
     def go_back(self):
         previous = [s for s in reversed(self.synergies) if "synergy_manual" in s]
+        cur = previous[0]
+        while (
+            cur["card1"]["name"] == self.current_pair[0]["name"]
+            and cur["card2"]["name"] == self.current_pair[1]["name"]
+        ):
+            previous.pop(0)
+            if not previous:
+                break
+            cur = previous[0]
+        previous.pop(0)
         if previous:
             last = previous[0]
             c1 = next(
