@@ -20,8 +20,8 @@ SYNERGY_FILE = "test_synergy.json" # Generated from my Model
 # SYNERGY_FILE = "random_real_synergies.json"  # Synergies from EDHREC
 
 UI_SCALE = 1.0
-IMAGE_SCALE = 2
-FONT_SIZE = 10
+IMAGE_SCALE = 1.5
+FONT_SIZE = 20
 
 
 def s(value):
@@ -392,10 +392,12 @@ class SynergyApp:
 
         top_frame = tk.Frame(self.root, bg="#f0f0f0")
         top_frame.pack(fill="both", expand=True)
+        top_frame.columnconfigure(0, weight=1)
+        top_frame.columnconfigure(1, weight=1)
 
         for side in [0, 1]:
             frame = tk.Frame(top_frame, bg="#f0f0f0")
-            frame.pack(side="left", fill="both", expand=True, padx=s(10), pady=s(10))
+            frame.grid(row=0, column=side, sticky="nsew", padx=s(10), pady=s(10))
 
             img_label = tk.Label(frame, bg="#f0f0f0")
             img_label.pack()
@@ -403,22 +405,20 @@ class SynergyApp:
             text = tk.Text(
                 frame,
                 height=s(10),
-                width=s(60),
                 wrap="word",
                 font=sf(("Arial", FONT_SIZE)),
                 state="disabled",
             )
-            text.pack()
+            text.pack(fill="both", expand=True)
 
             tags = tk.Text(
                 frame,
                 height=s(3),
-                width=s(60),
                 wrap="word",
                 font=sf(("Arial", FONT_SIZE)),
                 state="disabled",
             )
-            tags.pack()
+            tags.pack(fill="both", expand=True)
 
             var = tk.StringVar()
             search = ttk.Combobox(
