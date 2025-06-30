@@ -8,16 +8,16 @@ from io import BytesIO
 import tkinter.font as tkFont
 
 # === CONFIG ===
-BULK_FILE = "cards_with_tags_20250622170831_withuri.json"
+BULK_FILE = "cards_with_tags_3709_20250630171610.json"
 
 SYNERGY_FILE_TMP_NAME = "synergies_tmp"
 IMAGE_CACHE_DIR = "image-dataset/"
 
-# IGNORE_EDHREC = True
-# SYNERGY_FILE = "generated_synergies20250623203218.json" # Generated from my Model
+IGNORE_EDHREC = True
+SYNERGY_FILE = "test_synergy.json" # Generated from my Model
 
-IGNORE_EDHREC = False
-SYNERGY_FILE = "random_real_synergies.json"  # Synergies from EDHREC
+# IGNORE_EDHREC = False
+# SYNERGY_FILE = "random_real_synergies.json"  # Synergies from EDHREC
 
 UI_SCALE = 1.0
 IMAGE_SCALE = 2
@@ -51,24 +51,48 @@ def save_json(data, file):
 
 def load_or_download_image(card):
     os.makedirs(IMAGE_CACHE_DIR, exist_ok=True)
-    name = card["name"].replace("/", "_").replace(" ", "_")
-    image_path = os.path.join(IMAGE_CACHE_DIR, f"{name}.png")
+    layout = card.get("layout", "normal")
+    is_multiface = "card_faces" in card and layout in ["transform", "modal_dfc"]
 
-    if os.path.exists(image_path):
-        img = Image.open(image_path)
-    else:
-        url = card.get("image_uris", {}).get("png")
+    def get_image(face_name, url):
+        safe_name = face_name.replace("/", "_").replace(" ", "_")
+        image_path = os.path.join(IMAGE_CACHE_DIR, f"{safe_name}.png")
+        if os.path.exists(image_path):
+            return Image.open(image_path)
         if not url:
-            # Load a placeholder image (gray with "No image")
             img = Image.new("RGB", (300, 420), color="gray")
             draw = ImageDraw.Draw(img)
             draw.text((10, 190), "No Image", fill="black")
             img.save(image_path)
-        else:
-            response = requests.get(url)
-            img = Image.open(BytesIO(response.content))
-            img.save(image_path)
-    return img
+            return img
+        response = requests.get(url)
+        img = Image.open(BytesIO(response.content))
+        img.save(image_path)
+        return img
+
+    if is_multiface:
+        faces = card["card_faces"]
+        images = []
+        for face in faces:
+            face_name = face.get("name", "face")
+            url = face.get("image_uris", {}).get("png")
+            images.append(get_image(face_name, url))
+
+        # Combine images side by side
+        widths, heights = zip(*(img.size for img in images))
+        total_width = sum(widths)
+        max_height = max(heights)
+        combined = Image.new("RGB", (total_width, max_height))
+        x_offset = 0
+        for img in images:
+            combined.paste(img, (x_offset, 0))
+            x_offset += img.size[0]
+        return combined
+    else:
+        name = card["name"].replace("/", "_").replace(" ", "_")
+        url = card.get("image_uris", {}).get("png")
+        return get_image(name, url)
+
 
 
 def resize_image(img, height=400):
@@ -199,13 +223,48 @@ class SynergyApp:
                 self.image_labels[i].configure(image=tk_img)
                 self.image_labels[i].image = tk_img
 
-            text = f"Name: {card['name']}\nType: {card['type_line']}\nText: {card.get('oracle_text', '')}"
-            if "power" in card:
-                text += f"\nP/T: {card['power']} / {card['toughness']}"
+            layout = card.get("layout", "normal")
+            is_special = layout in ["transform", "modal_dfc", "split", "flip", "adventure"]
+            text_lines = []
+            tags = card.get("tags_labels", [])
+            self.tag_boxes[i].config(state="normal")
+            self.tag_boxes[i].delete("1.0", tk.END)
+            if tags:
+                self.tag_boxes[i].insert(tk.END, "Tags: " + ", ".join(tags))
+            else:
+                self.tag_boxes[i].insert(tk.END, "No tags")
+            self.tag_boxes[i].config(state="disabled")
+
+            if is_special and "card_faces" in card:
+                for face in card["card_faces"]:
+                    name = face.get("name", "")
+                    type_line = face.get("type_line", "")
+                    oracle = face.get("oracle_text", "")
+                    power = face.get("power", "")
+                    toughness = face.get("toughness", "")
+                    pt = f"\nP/T: {power} / {toughness}" if power and toughness else ""
+
+                    line = f"{name}\n{type_line}\n{oracle}"
+                    line += pt
+                    text_lines.append(line)
+            else:
+                name = card.get("name", "")
+                type_line = card.get("type_line", "")
+                oracle = card.get("oracle_text", "")
+                power = card.get("power", "")
+                toughness = card.get("toughness", "")
+                pt = f"\nP/T: {power} / {toughness}" if power and toughness else ""
+
+                line = f"{name}\n{type_line}\n{oracle}"
+                line += pt
+                text_lines.append(line)
+
+            final_text = "\n----------\n".join(text_lines)
             self.text_boxes[i].config(state="normal")
             self.text_boxes[i].delete("1.0", tk.END)
-            self.text_boxes[i].insert(tk.END, text)
+            self.text_boxes[i].insert(tk.END, final_text)
             self.text_boxes[i].config(state="disabled")
+            
             self.text_vars[i].set(card["name"])
 
         pred = entry.get("synergy_predicted", None)
@@ -327,6 +386,7 @@ class SynergyApp:
         self.card_frames = []
         self.image_labels = []
         self.text_boxes = []
+        self.tag_boxes = []
         self.search_boxes = []
         self.text_vars = []
 
@@ -350,6 +410,16 @@ class SynergyApp:
             )
             text.pack()
 
+            tags = tk.Text(
+                frame,
+                height=s(3),
+                width=s(60),
+                wrap="word",
+                font=sf(("Arial", FONT_SIZE)),
+                state="disabled",
+            )
+            tags.pack()
+
             var = tk.StringVar()
             search = ttk.Combobox(
                 frame,
@@ -365,6 +435,7 @@ class SynergyApp:
             self.card_frames.append(frame)
             self.image_labels.append(img_label)
             self.text_boxes.append(text)
+            self.tag_boxes.append(tags)
             self.search_boxes.append(search)
             self.text_vars.append(var)
 
