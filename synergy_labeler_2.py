@@ -6,6 +6,7 @@ import os
 import requests
 from io import BytesIO
 import tkinter.font as tkFont
+import random
 
 # === CONFIG ===
 BULK_FILE = "cards_with_tags_3709_20250630171610.json"
@@ -14,14 +15,15 @@ SYNERGY_FILE_TMP_NAME = "synergies_tmp"
 IMAGE_CACHE_DIR = "image-dataset/"
 
 IGNORE_EDHREC = True
-SYNERGY_FILE = "test_synergy.json" # Generated from my Model
+SYNERGY_FILE = "new_synergy_deck.json"  # Generated from my Model
+RANDOM_ORDER = True  # If True, the pairs are shuffled randomly
 
 # IGNORE_EDHREC = False
 # SYNERGY_FILE = "random_real_synergies.json"  # Synergies from EDHREC
 
 UI_SCALE = 1.0
-IMAGE_SCALE = 1.5
-FONT_SIZE = 20
+IMAGE_SCALE = 2
+FONT_SIZE = 10
 
 
 def s(value):
@@ -94,7 +96,6 @@ def load_or_download_image(card):
         return get_image(name, url)
 
 
-
 def resize_image(img, height=400):
     height = int(height * IMAGE_SCALE)
     w, h = img.size
@@ -130,8 +131,11 @@ class SynergyApp:
         self.synergies_without_manual = [
             entry
             for entry in self.synergy_entries
-            if (entry.get("synergy_manual") is None)
+            if (entry.get("synergy_manual") is None and entry.get("similarity") is None)
         ]
+        if RANDOM_ORDER:
+            random.shuffle(self.synergies_without_manual)
+
         self.synergies_labeled_this_session = []
 
         self.already_labeled_number = len(self.synergy_entries) - len(
@@ -162,7 +166,10 @@ class SynergyApp:
         for entry in synergies_tmp:
             key = f"{entry['card1']}_{entry['card2']}"
             if key in existing_synergies:
-                existing_synergies[key]["synergy_manual"] = entry["synergy_manual"]
+                if entry.get("synergy_manual") is not None:
+                    existing_synergies[key]["synergy_manual"] = entry["synergy_manual"]
+                if entry.get("similarity") is not None:
+                    existing_synergies[key]["similarity"] = entry["similarity"]
         merged_synergies = list(existing_synergies.values())
         save_json(merged_synergies, SYNERGY_FILE)
 
@@ -214,6 +221,8 @@ class SynergyApp:
         if not card1 or not card2:
             self.status_label.config(text="One or both cards not found.")
             return
+        else:
+            self.status_label.config(text="")
 
         for i, card in enumerate([card1, card2]):
             img = load_or_download_image(card)
@@ -224,7 +233,13 @@ class SynergyApp:
                 self.image_labels[i].image = tk_img
 
             layout = card.get("layout", "normal")
-            is_special = layout in ["transform", "modal_dfc", "split", "flip", "adventure"]
+            is_special = layout in [
+                "transform",
+                "modal_dfc",
+                "split",
+                "flip",
+                "adventure",
+            ]
             text_lines = []
             tags = card.get("tags_labels", [])
             self.tag_boxes[i].config(state="normal")
@@ -264,13 +279,14 @@ class SynergyApp:
             self.text_boxes[i].delete("1.0", tk.END)
             self.text_boxes[i].insert(tk.END, final_text)
             self.text_boxes[i].config(state="disabled")
-            
+
             self.text_vars[i].set(card["name"])
 
         pred = entry.get("synergy_predicted", None)
         manual = entry.get("synergy_manual", None)
         synergy_edhrec = entry.get("synergy_edhrec", None)
         synergy = entry.get("synergy", None)
+        similar = entry.get("similarity", None)
 
         if synergy is None:
             synergy = "N/A"
@@ -291,10 +307,17 @@ class SynergyApp:
         else:
             manual_str = f"{manual:.2f}"
 
+        if similar is None:
+            similar_str = "N/A"
+        else:
+            similar_str = f"{similar:.2f}"
+
         self.info_label.config(
             text=f"Predicted synergy: {pred} / EDHREC: {synergy_edhrec} / Synergy: {synergy}"
         )
-        self.manual_label.config(text=f"Manual synergy: {manual_str}")
+        self.manual_label.config(
+            text=f"Manual synergy: {manual_str} | Similarity: {similar_str}"
+        )
 
         self.manual_label.config(fg=self.synergy_color(manual))
 
@@ -307,6 +330,19 @@ class SynergyApp:
             # enable all others
             for button_dict in self.buttons.values():
                 if button_dict["value"] == manual:
+                    button_dict["button"].config(state="disabled")
+                else:
+                    button_dict["button"].config(state="normal")
+
+        if similar is None:
+            # No similarity labeled yet: enable all buttons
+            for button_dict in self.buttons_similarity.values():
+                button_dict["button"].config(state="normal")
+        else:
+            # Disable the button with the current similarity value,
+            # enable all others
+            for button_dict in self.buttons_similarity.values():
+                if button_dict["value"] == similar:
                     button_dict["button"].config(state="disabled")
                 else:
                     button_dict["button"].config(state="normal")
@@ -330,10 +366,46 @@ class SynergyApp:
             text=f"Labeled pairs: {self.already_labeled_number} / {len(self.synergy_entries)}"
         )
 
+    def label_similarity(self, value):
+        """
+        Label the similarity of the current synergy pair.
+        """
+        if (
+            self.synergies_without_manual[self.current_ptr].get("similarity", None)
+            is None
+            and self.synergies_without_manual[self.current_ptr].get(
+                "synergy_manual", None
+            )
+            is None
+        ):
+            self.synergies_without_manual[self.current_ptr]["similarity"] = value
+            self.already_labeled_number += 1
+            self.synergies_labeled_this_session.append(
+                self.synergies_without_manual[self.current_ptr]
+            )
+        else:
+            self.synergies_without_manual[self.current_ptr]["similarity"] = value
+            for i in range(len(self.synergies_labeled_this_session)):
+                synergy_i = self.synergies_labeled_this_session[i]
+                if (
+                    synergy_i["card1"]["name"]
+                    == self.synergies_without_manual[self.current_ptr]["card1"]["name"]
+                    and synergy_i["card2"]["name"]
+                    == self.synergies_without_manual[self.current_ptr]["card2"]["name"]
+                ):
+                    self.synergies_labeled_this_session[i] = (
+                        self.synergies_without_manual[self.current_ptr]
+                    )
+
+        save_json(self.synergies_labeled_this_session, self.synergy_file_tmp)
+        self.display_current_pair()
+
     def label_synergy(self, value):
 
         if (
             self.synergies_without_manual[self.current_ptr].get("synergy_manual", None)
+            is None
+            and self.synergies_without_manual[self.current_ptr].get("similarity", None)
             is None
         ):
             self.synergies_without_manual[self.current_ptr]["synergy_manual"] = value
@@ -458,17 +530,7 @@ class SynergyApp:
         self.manual_label.pack(pady=s(5))
 
         button_frame = tk.Frame(self.root, bg="#f0f0f0")
-        button_frame.pack(pady=s(10))
-
-        self.back_btn = tk.Button(
-            button_frame,
-            text="Back",
-            command=self.go_back,
-            width=s(30),
-            height=s(2),
-            font=sf(("Arial", FONT_SIZE)),
-        )
-        self.back_btn.pack(side="left", padx=s(5))
+        button_frame.pack(pady=s(10), fill="x")
 
         self.buttons = {
             "synergy": {"value": 1.0},
@@ -478,10 +540,42 @@ class SynergyApp:
             "negative": {"value": -1},
         }
 
-        for label, val_dict in self.buttons.items():
+        self.buttons_similarity = {
+            "similar": {"value": 1.0},
+            "kinda similar": {"value": 0.5},
+            "not similar": {"value": 0.0},
+        }
+
+        self.row1 = tk.Frame(button_frame)
+        self.row1.pack(fill="x")
+        self.row2 = tk.Frame(button_frame)
+        self.row2.pack(fill="x", pady=10)
+
+        # First row buttons: grid layout for side-by-side + centered
+        for i, (label, val_dict) in enumerate(self.buttons_similarity.items()):
             val = val_dict["value"]
             btn = tk.Button(
-                button_frame,
+                self.row1,
+                text=label.upper(),
+                command=lambda v=val: self.label_similarity(v),
+                width=s(20),
+                height=s(2),
+                font=sf(("Arial", FONT_SIZE)),
+                bg=self.synergy_color(val),
+            )
+            btn.grid(row=0, column=i + 1, padx=s(5), pady=s(2))
+            val_dict["button"] = btn
+
+        # Add empty expanding columns to left and right for centering row1 buttons
+        self.row1.grid_columnconfigure(0, weight=1)
+        self.row1.grid_columnconfigure(len(self.buttons_similarity) + 1, weight=1)
+
+        # Second row buttons + Back and Next buttons
+        total_buttons_row2 = len(self.buttons) + 2  # +2 for Back and Next buttons
+        for i, (label, val_dict) in enumerate(self.buttons.items()):
+            val = val_dict["value"]
+            btn = tk.Button(
+                self.row2,
                 text=label.upper(),
                 command=lambda v=val: self.label_synergy(v),
                 width=s(20),
@@ -489,18 +583,34 @@ class SynergyApp:
                 font=sf(("Arial", FONT_SIZE)),
                 bg=self.synergy_color(val),
             )
-            btn.pack(side="left", padx=s(5))
+            btn.grid(row=0, column=i + 1, padx=s(5), pady=s(2))
             val_dict["button"] = btn
 
+        # Back button
+        self.back_btn = tk.Button(
+            self.row2,
+            text="Back",
+            command=self.go_back,
+            width=s(30),
+            height=s(2),
+            font=sf(("Arial", FONT_SIZE)),
+        )
+        self.back_btn.grid(row=0, column=len(self.buttons) + 1, padx=s(5), pady=s(2))
+
+        # Next button
         self.next_btn = tk.Button(
-            button_frame,
+            self.row2,
             text="Next",
             command=self.go_next,
             width=s(30),
             height=s(2),
             font=sf(("Arial", FONT_SIZE)),
         )
-        self.next_btn.pack(side="left", padx=s(5))
+        self.next_btn.grid(row=0, column=len(self.buttons) + 2, padx=s(5), pady=s(2))
+
+        # Add empty expanding columns for centering row2 buttons
+        self.row2.grid_columnconfigure(0, weight=1)
+        self.row2.grid_columnconfigure(total_buttons_row2 + 1, weight=1)
 
         # Add this inside setup_ui(), after creating back_btn and next_btn buttons
 
